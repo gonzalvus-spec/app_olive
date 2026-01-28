@@ -16,13 +16,16 @@ class VentanaHomeCompleta extends StatefulWidget {
 class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with AutomaticKeepAliveClientMixin {
   final TextEditingController _cantidadController = TextEditingController();
   final TextEditingController _precioController = TextEditingController();
+  
   String? _productoSeleccionado;
   String? _clienteSeleccionado;
   List<String> _productos = [];
   List<String> _clientes = [];
   List<Map<String, dynamic>> _carrito = [];
   List<Map<String, dynamic>> _ventasHistorial = [];
+  
   bool _estaGuardando = false;
+  bool _mostrarHistorial = false; // Control de despliegue estilo Yape
   int _limiteVentas = 10;
 
   final PageController _pageController = PageController(viewportFraction: 0.9);
@@ -34,7 +37,7 @@ class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with Automati
   final Color _accentGreen = const Color(0xFF00BFA5);
 
   @override
-  bool get wantKeepAlive => true; // Esto evita que los datos se pierdan al cambiar de ventana
+  bool get wantKeepAlive => true;
 
   final List<Map<String, dynamic>> promos = [
     {
@@ -119,7 +122,7 @@ class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with Automati
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Necesario para mantener el estado vivo
+    super.build(context);
     double totalCarrito = _carrito.fold(0.0, (sum, item) => sum + (item['subtotal'] as double));
 
     return Scaffold(
@@ -179,8 +182,36 @@ class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with Automati
                               _buildTotalPanel(totalCarrito),
                             ],
                             const SizedBox(height: 30),
-                            _etiquetaSeccion("HISTORIAL RECIENTE"),
-                            _buildListaMovimientosHistoricos(),
+                            
+                            // BLOQUE DESPLEGABLE ESTILO YAPE
+                            GestureDetector(
+                              onTap: () => setState(() => _mostrarHistorial = !_mostrarHistorial),
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(15),
+                                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.receipt_long, color: _verdeClaro),
+                                    const SizedBox(width: 12),
+                                    Text("Ver movimientos recientes", style: TextStyle(fontWeight: FontWeight.bold, color: _verdeOscuro)),
+                                    const Spacer(),
+                                    Icon(
+                                      _mostrarHistorial ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                      color: Colors.grey,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            
+                            if (_mostrarHistorial) ...[
+                              const SizedBox(height: 10),
+                              _buildListaMovimientosHistoricos(),
+                            ],
                           ],
                         ),
                       ),
@@ -473,7 +504,7 @@ class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with Automati
             children: [
               Icon(Icons.receipt_long, color: Colors.grey[300], size: 50),
               const SizedBox(height: 10),
-              const Text("Cargando...", style: TextStyle(color: Colors.grey)),
+              const Text("No hay ventas aún", style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
@@ -521,7 +552,7 @@ class _VentanaHomeCompletaState extends State<VentanaHomeCompleta> with Automati
   }
 }
 
-// --- MODALES (Mantener igual) ---
+// --- MODALES ---
 
 class _ModalCalculadora extends StatefulWidget {
   const _ModalCalculadora();
