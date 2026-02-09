@@ -22,7 +22,7 @@
 
 1.  **Clonar el repositorio:**
     ```bash
-    git clone [https://github.com/TuUsuario/App_olive.git](https://github.com/TuUsuario/App_olive.git)
+    git clone [ https://github.com/gonzalvus-spec/app_olive.git]( https://github.com/gonzalvus-spec/app_olive.git)
     ```
 2.  **Instalar dependencias:**
     ```bash
@@ -39,7 +39,7 @@
 
 | Registro de Ventas | Historial Desplegable | Calculadora |
 | :--- | :--- | :--- |
-| ![Ventas](https://via.placeholder.com/150) | ![Historial](https://via.placeholder.com/150) | ![Calculadora](https://via.placeholder.com/150) |
+| ![Ventas](https://via.placeholder.com/150) | ![Historial](https://via.placeholder.com/150) | ![Pedidos](https://via.placeholder.com/150) |
 
 ---
 💻 Desarrollado por **GonzaloFll**

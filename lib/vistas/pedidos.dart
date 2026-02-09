@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart'; // Añadido para inicialización de fechas
 import '../mongo_service.dart';
 
 class VentanaPedidos extends StatefulWidget {
@@ -12,6 +13,8 @@ class VentanaPedidos extends StatefulWidget {
 class _VentanaPedidosState extends State<VentanaPedidos> {
   // --- Variables para Paginación ---
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController(); 
+  
   List<Map<String, dynamic>> _pedidosCargados = [];
   bool _estaCargando = false;
   bool _hayMasPedidos = true;
@@ -22,14 +25,17 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
   @override
   void initState() {
     super.initState();
+    // Inicializar datos locales para español/Perú
+    initializeDateFormatting('es_PE', null);
     _cargarSiguientePagina(); // Carga inicial
-    
-    // Escuchar el scroll para cargar más cuando llegue al final
+
+    // Escuchar el scroll para paginación infinita
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 &&
           !_estaCargando &&
           _hayMasPedidos &&
-          _fechaSeleccionada == null) {
+          _fechaSeleccionada == null &&
+          _searchController.text.isEmpty) {
         _cargarSiguientePagina();
       }
     });
@@ -38,16 +44,22 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  // ================= CARGA DE DATOS (PAGINACIÓN) =================
+  // --- Función auxiliar para limpiar el distrito ---
+  String _limpiarDistrito(dynamic valor) {
+    String raw = (valor ?? "").toString().trim();
+    return (raw.isEmpty || raw.toLowerCase() == "null") ? "DISTRITO" : raw;
+  }
+
+  // ================= CARGA DE DATOS (PAGINACIÓN Y FILTROS) =================
+
   Future<void> _cargarSiguientePagina() async {
     if (_estaCargando) return;
-
     setState(() => _estaCargando = true);
 
-    // Llamamos al servicio con skip (cuántos ya tenemos) y limit
     final nuevosPedidos = await MongoService.getVentasPaginadas(
       _pedidosCargados.length,
       _cantidadPorPagina,
@@ -63,12 +75,30 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
     });
   }
 
-  // Función para refrescar la lista (Pull to refresh)
+  Future<void> _buscarPorNombre(String nombre) async {
+    if (nombre.isEmpty) {
+      _refrescarLista();
+      return;
+    }
+    setState(() {
+      _estaCargando = true;
+      _pedidosCargados.clear();
+      _fechaSeleccionada = null; // Limpiar fecha al buscar por nombre
+    });
+    final resultados = await MongoService.getVentasPorNombre(nombre);
+    setState(() {
+      _pedidosCargados = resultados;
+      _estaCargando = false;
+      _hayMasPedidos = false;
+    });
+  }
+
   Future<void> _refrescarLista() async {
     setState(() {
       _pedidosCargados.clear();
       _hayMasPedidos = true;
-      _fechaSeleccionada = null; // Al refrescar quitamos filtros
+      _fechaSeleccionada = null;
+      _searchController.clear();
     });
     await _cargarSiguientePagina();
   }
@@ -134,27 +164,25 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
         false;
   }
 
-  // ================= LÓGICA DE FILTRADO Y AGRUPACIÓN =================
+  // ================= LÓGICA DE AGRUPACIÓN MODIFICADA PARA PERÚ =================
   Map<String, List<Map<String, dynamic>>> _agruparPorFecha(List<Map<String, dynamic>> ventas) {
     Map<String, List<Map<String, dynamic>>> grupos = {};
     for (var v in ventas) {
-      String fechaCompleta = v['fecha'] ?? "Sin Fecha";
-      String soloFecha = fechaCompleta.contains(" - ") ? fechaCompleta.split(" - ")[0] : fechaCompleta;
+      String soloFecha;
+      
+      if (v['createdAt'] != null) {
+        DateTime dt = v['createdAt'] is DateTime ? v['createdAt'] : DateTime.parse(v['createdAt'].toString());
+        // Ajustamos a hora local (Perú) antes de formatear
+        soloFecha = DateFormat("EEEE, d MMM. yyyy", 'es_PE').format(dt.toLocal());
+      } else {
+        String fechaCompleta = v['fecha'] ?? "Sin Fecha";
+        soloFecha = fechaCompleta.contains(" - ") ? fechaCompleta.split(" - ")[0] : fechaCompleta;
+      }
+
       if (!grupos.containsKey(soloFecha)) grupos[soloFecha] = [];
       grupos[soloFecha]!.add(v);
     }
     return grupos;
-  }
-
-  List<Map<String, dynamic>> _filtrarPorFecha(List<Map<String, dynamic>> ventas) {
-    // Nota: El filtrado ahora se hace principalmente en el servidor al seleccionar fecha,
-    // pero mantenemos esta lógica por seguridad si hubiera datos locales.
-    if (_fechaSeleccionada == null) return ventas;
-    String fechaBuscada = DateFormat("dd MMM. yyyy", 'es_ES').format(_fechaSeleccionada!).toLowerCase();
-    return ventas.where((v) {
-      String fechaDB = v['fecha']?.toString().toLowerCase() ?? "";
-      return fechaDB.contains(fechaBuscada);
-    }).toList();
   }
 
   // ================= ACTUALIZAR / ELIMINAR =================
@@ -183,8 +211,7 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
         await MongoService.updateEstado(venta['_id'], campo, nuevoEstado);
       }
       if (mounted) {
-        Navigator.pop(context);
-        _refrescarLista(); // Recargar para ver cambios
+        _refrescarLista();
       }
     }
   }
@@ -200,7 +227,6 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
     if (confirmar) {
       await MongoService.deleteVenta(venta['_id']);
       if (mounted) {
-        Navigator.pop(context);
         _refrescarLista();
       }
     }
@@ -209,8 +235,7 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
   // ================= UI PRINCIPAL =================
   @override
   Widget build(BuildContext context) {
-    final ventasFiltradas = _filtrarPorFecha(_pedidosCargados);
-    final ventasAgrupadas = _agruparPorFecha(ventasFiltradas);
+    final ventasAgrupadas = _agruparPorFecha(_pedidosCargados);
     final fechasKeys = ventasAgrupadas.keys.toList();
 
     return Scaffold(
@@ -222,12 +247,31 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(icon: const Icon(Icons.calendar_month), onPressed: _seleccionarFecha),
-          if (_fechaSeleccionada != null)
+          if (_fechaSeleccionada != null || _searchController.text.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.filter_alt_off, color: Colors.orangeAccent), 
-              onPressed: () => _refrescarLista()
+              onPressed: _refrescarLista
             ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(70),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: TextField(
+              controller: _searchController,
+              onSubmitted: _buscarPorNombre,
+              style: const TextStyle(color: Colors.black),
+              decoration: InputDecoration(
+                hintText: "Buscar cliente por nombre...",
+                prefixIcon: const Icon(Icons.search, color: Colors.teal),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+              ),
+            ),
+          ),
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: _refrescarLista,
@@ -273,13 +317,19 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
     String fechaCompleta = venta['fecha'] ?? "";
     String hora = fechaCompleta.contains(" - ") ? fechaCompleta.split(" - ")[1] : "";
 
+    String nombreDistrito = _limpiarDistrito(venta['distrito']);
+
     String detalle = (venta['productos'] != null && (venta['productos'] as List).isNotEmpty)
         ? (venta['productos'] as List).map((p) => "${p['cantidad']} ${p['producto']}").join(", ")
         : venta['detalle'] ?? "Sin detalle";
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)]),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(16), 
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)]
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () => _mostrarOpciones(venta),
@@ -295,12 +345,25 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(venta['cliente'] ?? "Cliente", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        if (hora.isNotEmpty) Text(hora, style: TextStyle(color: Colors.teal[700], fontSize: 11, fontWeight: FontWeight.w500)),
+                        Text(
+                          venta['cliente'] ?? "Cliente", 
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+                        ),
+                        Text(
+                          "${hora.isNotEmpty ? '$hora | ' : ''}$nombreDistrito", 
+                          style: TextStyle(
+                            color: Colors.teal[700], 
+                            fontSize: 11, 
+                            fontWeight: FontWeight.w500
+                          )
+                        ),
                       ],
                     ),
                   ),
-                  Text("S/. ${venta['monto']?.toStringAsFixed(2)}", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[900])),
+                  Text(
+                    "S/. ${venta['monto']?.toStringAsFixed(2)}", 
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[900])
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -326,6 +389,8 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
     List productos = venta['productos'] ?? [];
     double totalMonto = (venta['monto'] ?? 0).toDouble();
     String fechaCompleta = venta['fecha'] ?? "Sin fecha";
+    
+    String nombreDistrito = _limpiarDistrito(venta['distrito']);
 
     showModalBottomSheet(
       context: context,
@@ -340,7 +405,7 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
             const SizedBox(height: 15),
             Text(venta['cliente'].toString().toUpperCase(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text(fechaCompleta, style: TextStyle(color: Colors.teal[800], fontSize: 13, fontWeight: FontWeight.w500)),
+            Text("$nombreDistrito - $fechaCompleta", style: TextStyle(color: Colors.teal[800], fontSize: 13, fontWeight: FontWeight.w500)),
             const Divider(height: 30),
             const Text("DETALLE DEL PEDIDO", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
@@ -369,17 +434,26 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
             ListTile(
               leading: Icon(entregado ? Icons.undo : Icons.check_circle, color: Colors.blue),
               title: Text(entregado ? "Desmarcar Entrega" : "Marcar como Entregado"),
-              onTap: () => _update(venta, 'entregado'),
+              onTap: () {
+                Navigator.pop(context);
+                _update(venta, 'entregado');
+              },
             ),
             ListTile(
               leading: Icon(pagado ? Icons.money_off : Icons.attach_money, color: Colors.green),
               title: Text(pagado ? "Desmarcar Pago" : "Marcar como Pagado"),
-              onTap: () => _update(venta, 'pagado'),
+              onTap: () {
+                Navigator.pop(context);
+                _update(venta, 'pagado');
+              },
             ),
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text("Eliminar Pedido"),
-              onTap: () => _delete(venta),
+              onTap: () {
+                Navigator.pop(context);
+                _delete(venta);
+              },
             ),
             const SizedBox(height: 15),
           ],
@@ -392,37 +466,54 @@ class _VentanaPedidosState extends State<VentanaPedidos> {
   Widget _badgeEstado(String texto, Color color, IconData icono) => Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)), child: Row(children: [Icon(icono, size: 12, color: color), const SizedBox(width: 4), Text(texto, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))]));
   Widget _panelResumen(double total, double cobrado, double deuda) => Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.teal[900], borderRadius: BorderRadius.circular(12)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_datoResumen("TOTAL", total, Colors.white), _datoResumen("COBRADO", cobrado, Colors.greenAccent), _datoResumen("DEUDA", deuda, Colors.orangeAccent)]));
   Widget _datoResumen(String label, double valor, Color color) => Column(children: [Text(label, style: const TextStyle(color: Colors.white60, fontSize: 10)), Text("S/. ${valor.toStringAsFixed(1)}", style: TextStyle(color: color, fontWeight: FontWeight.bold))]);
-  Widget _etiquetaFecha(String fecha) => Padding(padding: const EdgeInsets.only(top: 10, bottom: 10), child: Text(fecha.toUpperCase(), style: TextStyle(color: Colors.teal[900], fontWeight: FontWeight.bold, fontSize: 13)));
+  
+  Widget _etiquetaFecha(String fecha) => Padding(
+    padding: const EdgeInsets.only(top: 15, bottom: 10), 
+    child: Text(
+      fecha.toUpperCase(), 
+      style: TextStyle(color: Colors.teal[900], fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1.2)
+    )
+  );
+  
   Widget _estadoVacio(String msg) => Center(child: Text(msg));
 
-  Future<void> _seleccionarFecha() async {
-    DateTime? fecha = await showDatePicker(
-      context: context, 
-      initialDate: DateTime.now(), 
-      firstDate: DateTime(2023), 
-      lastDate: DateTime.now(), 
-      locale: const Locale("es", "ES"), 
-      builder: (context, child) => Theme(data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: Colors.teal[800]!)), child: child!)
-    );
+  // ================= SELECCIONAR FECHA MODIFICADA (LIMA, PERÚ) =================
+ Future<void> _seleccionarFecha() async {
+  DateTime? fecha = await showDatePicker(
+    context: context, 
+    initialDate: DateTime.now(), 
+    firstDate: DateTime(2023), 
+    lastDate: DateTime.now(), 
+    locale: const Locale("es", "PE"), 
+    builder: (context, child) => Theme(
+      data: Theme.of(context).copyWith(
+        colorScheme: ColorScheme.light(primary: Colors.teal[800]!)
+      ), 
+      child: child!
+    )
+  );
 
-    if (fecha != null) {
-      setState(() {
-        _fechaSeleccionada = fecha;
-        _estaCargando = true;
-        _pedidosCargados.clear(); // Limpiamos para mostrar solo el resultado del filtro
-      });
+  if (fecha != null) {
+    setState(() {
+      _fechaSeleccionada = fecha;
+      _estaCargando = true;
+      _pedidosCargados.clear();
+      _searchController.clear(); 
+    });
 
-      // Formateamos para la búsqueda en MongoDB
-      String fechaQuery = DateFormat("dd MMM. yyyy", 'es_ES').format(fecha).toLowerCase();
-      
-      // Llamada al nuevo método del servicio
-      final resultados = await MongoService.getVentasPorFecha(fechaQuery);
+    // IMPORTANTE: Usamos un formato que no dependa de tildes en los días (lunes, miércoles, etc.)
+    // Buscamos solo el "corazón" de la fecha que está en tu BD: "31 ene. 2026"
+    String fechaQuery = DateFormat("d MMM. yyyy", 'es_PE').format(fecha);
+    
+    print("DEBUG: Buscando en MongoDB con el texto: $fechaQuery");
 
-      setState(() {
-        _pedidosCargados = resultados;
-        _estaCargando = false;
-        _hayMasPedidos = false; // Desactivamos carga infinita durante el filtro
-      });
-    }
+    final resultados = await MongoService.getVentasPorFecha(fechaQuery);
+
+    setState(() {
+      _pedidosCargados = resultados;
+      _estaCargando = false;
+      _hayMasPedidos = false; // Desactivamos paginación infinita durante el filtro
+    });
   }
+}
 }

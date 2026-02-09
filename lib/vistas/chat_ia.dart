@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Agregado para seguridad
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:convert';
 import '../mongo_service.dart';
 
@@ -17,13 +17,12 @@ class _VentanaChatIAState extends State<VentanaChatIA> {
   final List<Map<String, String>> _mensajes = [];
   bool _cargando = false;
 
-  // EXTRAEMOS LA LLAVE DESDE EL ARCHIVO .ENV PARA QUE NO SE FILTRE EN GITHUB
+  // Asegúrate de que en tu archivo .env la variable se llame GROQ_API_KEY y empiece con gsk_
   final String _apiKey = dotenv.env['GROQ_API_KEY'] ?? '';
 
   @override
   void initState() {
     super.initState();
-    // ================= MENSAJE DE BIENVENIDA =================
     _mensajes.add({
       "rol": "ia",
       "texto": "¡Hola! Soy Olivo-IA 🫒. Estoy listo para ayudarte con el control de tus pedidos, deudas y entregas de Cosecha Verde. ¿Qué deseas consultar hoy?"
@@ -32,8 +31,9 @@ class _VentanaChatIAState extends State<VentanaChatIA> {
 
   Future<void> _enviarPregunta() async {
     if (_controller.text.trim().isEmpty) return;
+    
     if (_apiKey.isEmpty) {
-      setState(() => _mensajes.add({"rol": "ia", "texto": "⚠️ Error: No se encontró la API Key en el archivo .env"}));
+      setState(() => _mensajes.add({"rol": "ia", "texto": "⚠️ Error: No se encontró la API Key en el archivo .env. Revisa que el nombre sea GROQ_API_KEY."}));
       return;
     }
 
@@ -56,7 +56,6 @@ class _VentanaChatIAState extends State<VentanaChatIA> {
           String situacionPago = (v['pagado'] == true) ? "PAGADO" : "DEBE DINERO";
           String situacionEntrega = (v['entregado'] == true) ? "YA ENTREGADO" : "PENDIENTE DE ENTREGA";
 
-          // Lógica para manejar el nuevo formato de productos (carrito)
           String detalleItems = "";
           if (v['productos'] != null && (v['productos'] as List).isNotEmpty) {
             List productos = v['productos'];
@@ -77,26 +76,22 @@ FECHA: ${v['fecha']}
         }
       }
 
+      // CONFIGURACIÓN PARA GROQ
       final url = Uri.parse('https://api.groq.com/openai/v1/chat/completions');
+      
       final response = await http.post(
         url,
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_apiKey',
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $_apiKey', 
         },
         body: jsonEncode({
-          "model": "llama-3.3-70b-versatile",
+          "model": "llama-3.3-70b-versatile", 
           "messages": [
             {
               "role": "system",
               "content": """Eres 'Olivo-IA' de la Cosecha Verde.
               REGLA DE ORO: Debes decir la cantidad exacta que aparece en 'DETALLE EXACTO'. 
-              
-              TAREAS:
-              - Si preguntan por entregas, lista solo los 'PENDIENTE DE ENTREGA'.
-              - Si preguntan por deudas, lista los que dicen 'DEBE DINERO'.
-              - Responde de forma amable y breve.
-              
               DATOS REALES DE LA BASE DE DATOS:
               $datosContextoIA"""
             },
@@ -107,16 +102,18 @@ FECHA: ${v['fecha']}
       );
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
         setState(() {
           _mensajes.add({
             "rol": "ia", 
             "texto": data['choices'][0]['message']['content'].toString().trim()
           });
         });
+      } else {
+        setState(() => _mensajes.add({"rol": "ia", "texto": "⚠️ Error ${response.statusCode}: Verifica que tu API Key de Groq sea correcta."}));
       }
     } catch (e) {
-      setState(() => _mensajes.add({"rol": "ia", "texto": "⚠️ Error al conectar con Olivos del Campo."}));
+      setState(() => _mensajes.add({"rol": "ia", "texto": "⚠️ Error de conexión: $e"}));
     } finally {
       setState(() => _cargando = false);
       _scrollToBottom();

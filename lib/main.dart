@@ -12,7 +12,6 @@ void main() async {
   await Hive.initFlutter();
   await Hive.openBox('cache_box');
   await dotenv.load(fileName: ".env"); // Abrimos un "cajón" para los datos
-  // 1. Lanzamos la app de inmediato
   runApp(const AppVentasPremium());
 
   // 2. Conectamos a Mongo en segundo plano (sin 'await')

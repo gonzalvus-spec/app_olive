@@ -1,5 +1,5 @@
 import 'package:mongo_dart/mongo_dart.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Importante para leer el .env
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class MongoService {
   static Db? db;
@@ -7,7 +7,6 @@ class MongoService {
   static DbCollection? clientesCollection;
   static DbCollection? productosCollection;
 
-  // Ya no escribimos la URL aquí, la traemos del "escondite"
   static final String mongoUrl = dotenv.env['MONGODB_URL'] ?? "";
 
   static Future<void> connect() async {
@@ -33,7 +32,17 @@ class MongoService {
     }
   }
 
+  // --- Función interna para normalizar distritos ---
+  static String _normalizarDistrito(dynamic valor) {
+    final String texto = (valor ?? "").toString().trim();
+    if (texto.isEmpty || texto.toLowerCase() == "null") {
+      return "DISTRITO";
+    }
+    return texto;
+  }
+
   // ================= GESTIÓN DE VENTAS =================
+
   static Future<List<Map<String, dynamic>>> getVentas() async {
     if (ventasCollection == null) await connect();
     return await ventasCollection!.find(where.sortBy('createdAt', descending: true)).toList();
@@ -53,6 +62,53 @@ class MongoService {
     }
   }
 
+  static Future<List<Map<String, dynamic>>> getVentasPorNombre(String nombre) async {
+    if (ventasCollection == null) await connect();
+    try {
+      return await ventasCollection!.find(
+        where.match('cliente', '.*$nombre.*', caseInsensitive: true)
+             .sortBy('createdAt', descending: true)
+      ).toList();
+    } catch (e) {
+      print("❌ Error buscando por nombre: $e");
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getVentasPorDistrito(String distrito) async {
+    if (ventasCollection == null) await connect();
+    try {
+      return await ventasCollection!.find(
+        where.eq('distrito', distrito)
+             .sortBy('createdAt', descending: true)
+      ).toList();
+    } catch (e) {
+      print("❌ Error buscando por distrito: $e");
+      return [];
+    }
+  }
+
+  static Future<List<String>> getDistritosDeVentas() async {
+    if (ventasCollection == null) await connect();
+    try {
+      final dynamic result = await ventasCollection!.distinct('distrito');
+      if (result is List) {
+        final listaLimpia = (result as List<dynamic>)
+            .map((item) => _normalizarDistrito(item))
+            .where((item) => item != "DISTRITO") // Opcional: filtrar el genérico
+            .toSet()
+            .toList();
+
+        listaLimpia.sort();
+        return listaLimpia;
+      }
+      return [];
+    } catch (e) {
+      print("❌ Error en getDistritosDeVentas: $e");
+      return [];
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getVentasPorFecha(String fechaBuscada) async {
     if (ventasCollection == null) await connect();
     try {
@@ -68,9 +124,13 @@ class MongoService {
 
   static Future<void> insertVenta(Map<String, dynamic> data) async {
     if (ventasCollection == null) await connect();
+    
+    // Normalizar distrito antes de insertar
+    data['distrito'] = _normalizarDistrito(data['distrito']);
     data['pagado'] = data['pagado'] ?? false;
     data['entregado'] = data['entregado'] ?? false;
     data['createdAt'] = data['createdAt'] ?? DateTime.now();
+    
     await ventasCollection!.insert(data);
     print("✅ Venta guardada con éxito");
   }
@@ -88,24 +148,40 @@ class MongoService {
   }
 
   // ================= GESTIÓN DE CLIENTES =================
+
   static Future<List<String>> getClientes() async {
     if (clientesCollection == null) await connect();
-    final lista = await clientesCollection!.find().toList();
-    return lista.map((c) => c['nombre'].toString()).toList();
+    final lista = await clientesCollection!.find(where.sortBy('nombre')).toList();
+    return lista.map((c) => (c['nombre'] ?? "Sin nombre").toString()).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> getClientesData() async {
+    if (clientesCollection == null) await connect();
+    return await clientesCollection!.find(where.sortBy('nombre')).toList();
   }
 
   static Future<void> insertCliente(Map<String, dynamic> data) async {
     if (clientesCollection == null) await connect();
+    
+    // Normalizar distrito del cliente
+    data['distrito'] = _normalizarDistrito(data['distrito']);
     data['createdAt'] = DateTime.now();
+    
     await clientesCollection!.insert(data);
     print("✅ Cliente guardado");
   }
 
   // ================= GESTIÓN DE PRODUCTOS =================
+
   static Future<List<String>> getProductos() async {
     if (productosCollection == null) await connect();
-    final lista = await productosCollection!.find().toList();
-    return lista.map((p) => p['nombre'].toString()).toList();
+    final lista = await productosCollection!.find(where.sortBy('nombre')).toList();
+    return lista.map((p) => (p['nombre'] ?? "Producto").toString()).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> getProductosData() async {
+    if (productosCollection == null) await connect();
+    return await productosCollection!.find(where.sortBy('nombre')).toList();
   }
 
   static Future<void> insertProducto(Map<String, dynamic> data) async {
